@@ -1,0 +1,120 @@
+// ARENA-GRID — canonical data model.
+//
+// This file is the **design source of truth**. The runtime uses
+// SQLAlchemy ORM (arena/models.py) which mirrors this schema by hand.
+// In production we would add a generator; for the MVP, manual sync.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Topology ─────────────────────────────────────────────────────────
+
+model Region {
+  id              String           @id
+  name            String
+  lat             Float
+  lng             Float
+  installedSolar  Float            @default(0)
+  installedWind   Float            @default(0)
+  installedHydro  Float            @default(0)
+  renewableNodes  RenewableNode[]
+  computeNodes    ComputeNode[]
+  ticks           EnergyTick[]
+}
+
+enum Source {
+  SOLAR
+  WIND
+  HYDRO
+}
+
+model RenewableNode {
+  id           String @id
+  region       Region @relation(fields: [regionId], references: [id])
+  regionId     String
+  source       Source
+  capacityKw   Float
+  online       Boolean @default(true)
+}
+
+enum NodeClass {
+  GPU_CLUSTER
+  ASIC_FARM
+  EDGE_INFERENCE
+  CPU_GRID
+}
+
+model ComputeNode {
+  id            String         @id
+  region        Region         @relation(fields: [regionId], references: [id])
+  regionId      String
+  className     NodeClass
+  powerDrawKw   Float
+  tflops        Float          @default(0)
+  hashrateThs   Float          @default(0)
+  online        Boolean        @default(true)
+  workloads     Workload[]
+}
+
+// ─── Workloads ────────────────────────────────────────────────────────
+
+enum WorkloadKind {
+  AI_INFERENCE
+  MINING
+  DISTRIBUTED_COMPUTE
+}
+
+enum WorkloadState {
+  QUEUED
+  RUNNING
+  DEFERRED
+  COMPLETED
+  FAILED
+}
+
+model Workload {
+  id           String         @id
+  kind         WorkloadKind
+  priority     Float          // 0.0–1.0
+  demandKw     Float
+  state        WorkloadState  @default(QUEUED)
+  assignedNode ComputeNode?   @relation(fields: [assignedNodeId], references: [id])
+  assignedNodeId String?
+  createdAt    DateTime       @default(now())
+  startedAt    DateTime?
+  completedAt  DateTime?
+  rationale    String?        // allocator decision trace
+}
+
+// ─── Time-series ──────────────────────────────────────────────────────
+
+model EnergyTick {
+  id            BigInt   @id @default(autoincrement())
+  ts            DateTime @default(now())
+  region        Region   @relation(fields: [regionId], references: [id])
+  regionId      String
+  generationMw  Float
+  demandMw      Float
+  surplusMw     Float
+  renewableShare Float
+  carbonAvoidedKg Float  @default(0)
+
+  @@index([ts])
+  @@index([regionId, ts])
+}
+
+model Block {
+  id        BigInt   @id @default(autoincrement())
+  height    Int      @unique
+  ts        DateTime @default(now())
+  hash      String
+  miner     String
+  rewardTokens Float
+  energyKwh    Float
+}
